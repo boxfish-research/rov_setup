@@ -1,6 +1,7 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
 # set-boot2iso - Set up this machine to boot from iso 
+#              - modifies the grub boot configuration
 
 # Copyright 2020, Rov,,, <rov@rov-kvm>
 # All rights reserved.
@@ -13,6 +14,15 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
+
+# trap and print errors 
+set -e -o pipefail
+function print_error {
+    read line file <<<$(caller)
+    echo "An error occurred in line $line of file $file:" >&2
+    sed "${line}q;d" "$file" >&2
+}
+trap print_error ERR
 
 clean_up() { # Perform pre-exit housekeeping
   return

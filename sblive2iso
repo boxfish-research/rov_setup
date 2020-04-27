@@ -14,6 +14,16 @@
 PROGNAME=${0##*/}
 VERSION="0.1"
 
+# trap and print errors 
+set -e -o pipefail
+function print_error {
+    read line file <<<$(caller)
+    echo "An error occurred in line $line of file $file:" >&2
+    sed "${line}q;d" "$file" >&2
+}
+trap print_error ERR
+
+
 clean_up() { # Perform pre-exit housekeeping
   return
 }
@@ -135,6 +145,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     if [ -d "$TEMP_DIR" ]; then rm -R $TEMP_DIR; fi
 
   mkdir -p "$TEMP_DIR"
+  
   echo -e "${GRN} ###### Extracting $file_name ${NC} tar into  $TEMP_DIR ######"
   tar -xf "$path" -C "$TEMP_DIR"
 
@@ -170,6 +181,8 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
   $TEMP_DIR
 fi
 echo ""
+
+rm -R $TEMP_DIR
 
 graceful_exit
 
