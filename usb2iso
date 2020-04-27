@@ -1,0 +1,206 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# usb2iso - copy usb live to an iso file image
+
+# Copyright 2020, Rov,,, <rov@rov-kvm>
+# All rights reserved.
+
+# Usage: usb2iso [-h|--help]
+
+# Revision history:
+# 2020-04-22 Created by gen ver. 3.3
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.1"
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [-h|--help]"
+}
+
+help_message() {
+  cat <<- _EOF_
+  $PROGNAME ver. $VERSION
+  Copy iso image file from bootable USB
+
+  $(usage)
+
+  Options:
+  -h, --help  Display this help message and exit.
+  -i, --in    source live USB
+  -o, --out   out iso file path
+  -t, --test  run as test mode
+
+  NOTE: You must be the superuser to run this script.
+
+_EOF_
+  return
+}
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+
+# Parse command-line
+
+run_as_test=false
+while [[ -n $1 ]]; do
+  case $1 in
+    -h | --help)  help_message; graceful_exit ;;
+    -i | --in)    shift; cdrom="$1" ;;
+    -o | --out)   shift; iso_path="$1" ;;
+    -t | --test)  run_as_test=true ;;
+    -* | --*)     usage; error_exit "Unknown option $1" ;;
+    *)            break ;;
+  esac
+  shift
+done
+
+# contains(string, substring)
+#
+# Returns 0 if the specified string contains the specified substring,
+# otherwise returns 1.
+contains() {
+    string="$1"
+    substring="$2"
+    if test "${string#*$substring}" != "$string"
+    then
+        return 0    # $substring is in $string
+    else
+        return 1    # $substring is not in $string
+    fi
+}
+
+# Main logic
+
+RED='\033[0;31m';  GRN='\033[0;32m';  BLU='\033[0;34m';  YEL='\033[1;33m';  
+NC='\033[0m' # No Color
+ERR="${RED} [Error]:${NC}"
+echo ""
+echo -e "${GRN} ########################################################## ${NC} "
+echo -e "${GRN} #########  Copy iso image file from bootable USB  ######## ${NC}"
+echo -e "${GRN} ########################################################## ${NC}"
+set -e  # exit immediately on error
+
+
+iso_path=$(readlink -f $iso_path)  # absolute filepath
+dir_name="$(dirname "$iso_path")"
+file_name=$(basename -- $iso_path)
+extension="${file_name##*.}"
+file_name="${file_name%.*}"
+
+echo -e "${GRN} Checking files"
+echo -e "${GRN} iso_path:  \e[0m $iso_path"
+echo -e "${GRN} dir_name:  \e[0m $dir_name"
+echo -e "${GRN} file_name: \e[0m $file_name"
+echo -e "${GRN} extension: \e[0m $extension"
+
+if [ ! -d $dir_name ] ; then
+  echo -e "${ERR} - ${RED}"$dir_name"${NC} does not exist"
+  exit
+fi
+
+if [ $extension != "iso"  ] ; then 
+  echo -e "${ERR} - ${RED}"$iso_path"${NC} must have .iso extension"
+  exit
+fi
+
+
+# # run as sudo
+# if ! $run_as_test && [ "$EUID" -ne 0 ]; then
+#   { echo "Please run as root"; exit; }  
+# fi
+
+# find if USB /dev/srX is mounted
+# mnt_pnt=$(lsblk -l | grep "cdrom" | grep -oE '[^ ]+$')
+
+# if grep -qs '/mnt/foo ' /proc/mounts; then
+#     echo "It's mounted."
+# else
+#     echo "It's not mounted."
+# fi
+
+# Newer kernels and userspace tools use libata, and map everything to scsi-like devices. 
+# So /dev/sr0 is now the first scsi-rom (zero)
+# . /dev/cdrom is usually a symlink to the first CD-ROM device
+# so we look for /dev/cdrom  ( i.e) /dev/srX
+
+echo " Checking the see if /dev/cdrom is present and checking data size "
+
+blk_size=$(isoinfo -d -i /dev/cdrom | grep -i -E 'block size' | grep -Eo '[0-9]+$')
+vol_size=$(isoinfo -d -i /dev/cdrom | grep -i -E 'volume size' | grep -Eo '[0-9]+$')
+
+echo "  - block size = $blk_size, volume size = $vol_size"
+let img_size=$blk_size*$vol_size
+echo "  - Image size = $img_size" 
+
+if [ $img_size -lt 500000000 ]; then 
+  echo -e " ${ERR} -ISO Image size of $img_size is too small ${NC}" 
+  exit
+fi
+
+# Check / Mount the USB cdrom"
+mnt_pnt=/media/sblive
+sudo mkdir -p $mnt_pnt
+
+if ! mountpoint -q $mnt_pnt; then 
+  echo "  - Mounting /dev/cdrom to $mnt_pnt"
+  sudo mount -t iso9660 -o ro /dev/cdrom $mnt_pnt
+else
+  echo "  - /dev/cdrom is already mounted on $mnt_pnt"  
+fi
+
+cd_files=$(ls $mnt_pnt)
+cd_files=${cd_files//$'\n'/}
+echo -e "  - Files on $mnt_pnt = ${GRN} $cd_files"
+
+if contains $cd_files "boot" && contains $cd_files "casper" && \
+   contains $cd_files "EFI" && contains $cd_files "isolinux"; then 
+  echo -e " ${GRN} Found LiveISO containing  $cd_files  ${NC}" 
+else
+  echo -e " ${ERR} This is not an LiveISO, file are $cd_files ${NC}" 
+  exit
+fi
+
+
+
+echo -e "${YEL} Do you want copy USB image to ${NC}$iso_path ${YEL} ?  "
+read -p '          Y/N ? ' -n 1 -r
+echo -e "${NC}"
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "  Run:  dd if=/dev/sr0  of=$iso_path  bs=$blk_size  count=$vol_size  status=progress"
+  dd if=/dev/sr0  of=$iso_path  bs=$blk_size  count=$vol_size  status=progress
+fi
+
+graceful_exit
+

@@ -1,0 +1,175 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# btest - Convert sblive directory into an iso
+# use this after running systemback 
+# Copyright 2020, Rov,,, <rov@rov-kvm>
+# All rights reserved.
+
+# Usage: sblive2iso [-h|--help] [--n|--name]
+
+# Revision history:
+# 2020-04-21 Created by gen ver. 3.3
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.1"
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [-h|--help] [--n|--name]"
+}
+
+help_message() {
+  cat <<- _EOF_
+  $PROGNAME ver. $VERSION
+  Convert sblive directory into an iso
+   - use this after running systemback
+
+  $(usage)
+
+  Options:
+  -h, --help  Display this help message and exit.
+  -n, --name  name of file
+
+  NOTE: You must be the superuser to run this script.
+
+_EOF_
+  return
+}
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+
+
+# Parse command-line
+while [[ -n $1 ]]; do
+  case $1 in
+    -h | --help)
+      help_message; graceful_exit ;;
+    -n | --name)
+      echo "name of file"; shift; path="$1" ;;
+    -* | --*)
+      usage
+      error_exit "Unknown option $1" ;;
+    *)
+      echo "Argument $1 to process..." ;;
+  esac
+  shift
+done
+
+# Main logic
+
+#  This is to support systemback iso generation which uses mkisofs to generate the iso.
+# For unknown reasons  mkisofs iso does not boot on qemu virtual machine.
+# This uses  xorriso -as mkisofs which does work
+RED='\033[0;31m';  GRN='\033[0;32m';  BLU='\033[0;34m';  YEL='\033[1;33m';  
+NC='\033[0m' # No Color
+
+echo ""
+echo -e "${GRN} ################################################## ${NC} "
+echo -e "${GRN} ###  Convert sblive tar file to directory   ###### ${NC}"
+echo -e "${GRN} ################################################## ${NC}"
+set -e  # exit immediately on error
+
+# [ ! -n "$1" ] && { echo -e "\e[31m [Error]:\e[0m Need an sblive file to convert" ; exit ;}
+# path=$1
+dir_name="$(dirname "$path")"
+[ ! -f "$path" ] && { echo -e "\e[31m [Error]:\e[0m file: \e[31m"$path"\e[0m does not exist" ; exit ;}
+temp="${path%"${path##*[!/]}"}" # extglob-free multi-trailing-/ trim
+file_name="${temp##*/}"          # remove everything before the last /
+
+
+file_name=$(basename -- $path)
+extension="${file_name##*.}"
+file_name="${file_name%.*}"
+
+echo -e "${GRN} Checking files"
+echo -e "${GRN} filepath:  \e[0m $path"
+echo -e "${GRN} dir_name:  \e[0m $dir_name"
+echo -e "${GRN} file_name: \e[0m $file_name"
+echo -e "${GRN} extension: \e[0m $extension"
+
+
+echo " "
+if [ ! -f "$path" ]; then 
+  { echo -e "${RED} [Error]:${NC}file: ${RED} "$path"${NC}does not exist" ; exit ;}
+fi
+
+if [ "$EUID" -ne 0 ]; then { echo -e "${RED}  [Error]: Please run as root, ie with sudo"; exit; } fi
+
+TEMP_DIR=$dir_name/sb_temp
+
+echo -e " ${YEL}  Do you want to extract $file_name.$extension into $TEMP_DIR ?  "
+read -p '          y/n ' -n 1 -r
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo "  Over writing   $TEMP_DIR .... "
+    if [ -d "$TEMP_DIR" ]; then rm -R $TEMP_DIR; fi
+
+  mkdir -p "$TEMP_DIR"
+  echo -e "${GRN} ###### Extracting $file_name ${NC} tar into  $TEMP_DIR ######"
+  tar -xf "$path" -C "$TEMP_DIR"
+
+  mv $TEMP_DIR/syslinux/syslinux.cfg $TEMP_DIR/syslinux/isolinux.cfg
+  mv $TEMP_DIR/syslinux $TEMP_DIR/isolinux
+fi
+
+echo " "; echo " "
+
+echo -e " ${YEL}  Do you want to make  $dir_name/$file_name.iso ?  "
+read -p '          y/n ' -n 1 -r
+echo ""
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo -e "\e[32m ######  Converting $TEMP_DIR to iso        ####### \e[0m"
+
+  echo " Running :   xorriso -o $dir_name/$file_name.iso  [ on file  $TEMP_DIR ] "
+
+  xorriso -as mkisofs \
+  -V "ROVlive" \
+  -J -R \
+  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+  -c isolinux/boot.cat \
+  -b isolinux/isolinux.bin \
+  -iso-level 3 \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -eltorito-alt-boot \
+  -e boot/grub/efi.img \
+  -no-emul-boot \
+  -isohybrid-gpt-basdat \
+  -o $dir_name/$file_name.iso \
+  $TEMP_DIR
+fi
+echo ""
+
+graceful_exit
+

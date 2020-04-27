@@ -1,0 +1,10 @@
+#!/bin/bash
+mnt_pnt="go"
+while [ -n "$mnt_pnt" ]; do 
+	mnt_pnt=$(lsblk -l | grep "sr" | grep -oE '[^ ]+$')
+	echo " mount $mnt_pnt"
+	if [ -n "$mnt_pnt" ] ; then 
+		echo " umount $mnt_pnt"
+		sudo umount $mnt_pnt
+	fi
+done

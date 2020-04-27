@@ -1,0 +1,1 @@
+/home/rov/pycharm-2019.3.4, /home/rov/Downloads,  /home/rov/.cache,  /home/rov/.PyCharm2019.3, /usr/lib/firefox
