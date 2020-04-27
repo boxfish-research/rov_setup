@@ -177,7 +177,7 @@ echo -e "${GRN} #########  Set up to boot from iso  ############ ${NC}"
 echo -e "${GRN} ################################################# ${NC}"
 set -e  # exit immediately on error
 
-[ ! -f "$iso_path" ] && { echo -e "${RED} [Error]:${NC} file: ${RED}"$iso_path"${NC} does not exist" ; exit ;}
+[ ! -f "$iso_path" ] && { echo -e "${RED} [Error]:${NC} file: ${RED}"$iso_path" {NC} does not exist" ; exit ;}
 
 iso_path=$(readlink -f $iso_path)   # absolute filepath
 echo -e "${GRN} iso_path:  \e[0m $iso_path"

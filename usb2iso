@@ -14,6 +14,15 @@
 PROGNAME=${0##*/}
 VERSION="0.1"
 
+set -e -o pipefail
+
+function print_error {
+    read line file <<<$(caller)
+    echo "An error occurred in line $line of file $file:" >&2
+    sed "${line}q;d" "$file" >&2
+}
+
+trap print_error ERR
 clean_up() { # Perform pre-exit housekeeping
   return
 }
@@ -58,7 +67,8 @@ help_message() {
   -o, --out   out iso file path
   -t, --test  run as test mode
 
-  NOTE: You must be the superuser to run this script.
+  NOTE: List of disk images
+  $(lsblk -l)
 
 _EOF_
   return
@@ -108,7 +118,7 @@ echo ""
 echo -e "${GRN} ########################################################## ${NC} "
 echo -e "${GRN} #########  Copy iso image file from bootable USB  ######## ${NC}"
 echo -e "${GRN} ########################################################## ${NC}"
-set -e  # exit immediately on error
+# set -e  # exit immediately on error
 
 
 iso_path=$(readlink -f $iso_path)  # absolute filepath
@@ -142,6 +152,7 @@ fi
 # find if USB /dev/srX is mounted
 # mnt_pnt=$(lsblk -l | grep "cdrom" | grep -oE '[^ ]+$')
 
+
 # if grep -qs '/mnt/foo ' /proc/mounts; then
 #     echo "It's mounted."
 # else
@@ -153,17 +164,20 @@ fi
 # . /dev/cdrom is usually a symlink to the first CD-ROM device
 # so we look for /dev/cdrom  ( i.e) /dev/srX
 
-echo " Checking the see if /dev/cdrom is present and checking data size "
+echo " Checking the see if $cdrom is present and checking data size "
 
-blk_size=$(isoinfo -d -i /dev/cdrom | grep -i -E 'block size' | grep -Eo '[0-9]+$')
-vol_size=$(isoinfo -d -i /dev/cdrom | grep -i -E 'volume size' | grep -Eo '[0-9]+$')
+blk_size=$(sudo isoinfo -d -i $cdrom | grep -i -E 'block size' | grep -Eo '[0-9]+$')
+vol_size=$(sudo isoinfo -d -i $cdrom | grep -i -E 'volume size' | grep -Eo '[0-9]+$')
 
 echo "  - block size = $blk_size, volume size = $vol_size"
 let img_size=$blk_size*$vol_size
 echo "  - Image size = $img_size" 
 
-if [ $img_size -lt 500000000 ]; then 
+if [ $img_size -lt 200000000 ]; then 
   echo -e " ${ERR} -ISO Image size of $img_size is too small ${NC}" 
+  exit
+elif [ $img_size -gt 4000000000 ]; then 
+  echo -e " ${ERR} -ISO Image size of $img_size is too large ${NC}" 
   exit
 fi
 
@@ -172,10 +186,10 @@ mnt_pnt=/media/sblive
 sudo mkdir -p $mnt_pnt
 
 if ! mountpoint -q $mnt_pnt; then 
-  echo "  - Mounting /dev/cdrom to $mnt_pnt"
-  sudo mount -t iso9660 -o ro /dev/cdrom $mnt_pnt
+  echo "  - Mounting $cdrom to $mnt_pnt"
+  sudo mount -t iso9660 -o ro $cdrom $mnt_pnt
 else
-  echo "  - /dev/cdrom is already mounted on $mnt_pnt"  
+  echo "  - $cdrom is already mounted on $mnt_pnt"  
 fi
 
 cd_files=$(ls $mnt_pnt)
@@ -189,17 +203,17 @@ else
   echo -e " ${ERR} This is not an LiveISO, file are $cd_files ${NC}" 
   exit
 fi
+sudo umount $mnt_pnt
 
 
-
-echo -e "${YEL} Do you want copy USB image to ${NC}$iso_path ${YEL} ?  "
+echo -e "${YEL} Do you want copy USB image [$img_size bytes] to ${NC}$iso_path ${YEL} ?  "
 read -p '          Y/N ? ' -n 1 -r
 echo -e "${NC}"
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
   echo ""
-  echo "  Run:  dd if=/dev/sr0  of=$iso_path  bs=$blk_size  count=$vol_size  status=progress"
-  dd if=/dev/sr0  of=$iso_path  bs=$blk_size  count=$vol_size  status=progress
+  echo "  Run:  dd if=$cdrom of=$iso_path  bs=$blk_size  count=$vol_size  status=progress"
+  sudo dd if=$cdrom  of=$iso_path  bs=$blk_size  count=$vol_size  status=progress
 fi
 
 graceful_exit
